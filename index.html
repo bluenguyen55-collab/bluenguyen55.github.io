@@ -1,0 +1,1711 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StudyAI - Quản lý học tập & Ôn thi thông minh</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel Standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- PDF.js for reading PDF files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- HELPER COMPONENT FOR LUCIDE ICONS ---
+    const Icon = ({ name, size = 18, className = "" }) => {
+      const iconRef = useRef(null);
+
+      useEffect(() => {
+        if (iconRef.current && window.lucide) {
+          iconRef.current.innerHTML = '';
+          const iconElement = document.createElement('i');
+          iconElement.setAttribute('data-lucide', name);
+          iconRef.current.appendChild(iconElement);
+          window.lucide.createIcons({
+            root: iconRef.current,
+            attrs: {
+              width: size,
+              height: size,
+              class: className
+            }
+          });
+        }
+      }, [name, size, className]);
+
+      return <span ref={iconRef} className="inline-flex items-center justify-center shrink-0"></span>;
+    };
+
+    // --- DATE HELPERS ---
+    const getTodayKey = (offsetDays = 0) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const getShortDayLabel = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dateObj = new Date(y, m - 1, d);
+      const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+      return `${days[dateObj.getDay()]} (${d}/${m})`;
+    };
+
+    // --- DEFAULT INITIAL DATA ---
+    const DEFAULT_SUBJECTS = [
+      { id: 'sub-1', name: 'Toán học', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
+      { id: 'sub-2', name: 'Ngữ văn', color: 'bg-rose-500', textColor: 'text-rose-700', bgLight: 'bg-rose-50' },
+      { id: 'sub-3', name: 'Địa lí', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgLight: 'bg-emerald-50' },
+      { id: 'sub-4', name: 'Tiếng Anh', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
+    ];
+
+    const DEFAULT_TODOS = [
+      { id: 'todo-1', title: 'Giải đề thi thử THPTQG số 01', subjectId: 'sub-1', priority: 'high', deadline: getTodayKey(0), completed: false },
+      { id: 'todo-2', title: 'Lập dàn ý phân tích tác phẩm văn học', subjectId: 'sub-2', priority: 'medium', deadline: getTodayKey(1), completed: false },
+      { id: 'todo-3', title: 'Ôn tập Atlat Địa lí Việt Nam', subjectId: 'sub-3', priority: 'low', deadline: getTodayKey(2), completed: true },
+    ];
+
+    const SUBJECT_COLORS = [
+      { name: 'Xanh dương', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
+      { name: 'Đỏ hồng', color: 'bg-rose-500', textColor: 'text-rose-700', bgLight: 'bg-rose-50' },
+      { name: 'Xanh ngọc', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgLight: 'bg-emerald-50' },
+      { name: 'Vàng cam', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
+      { name: 'Tím', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
+      { name: 'Xanh lơ', color: 'bg-cyan-500', textColor: 'text-cyan-700', bgLight: 'bg-cyan-50' },
+    ];
+
+    // --- MAIN APPLICATION ---
+    function App() {
+      // Navigation & Modal States
+      const [activeTab, setActiveTab] = useState('planner'); // 'planner' | 'exam'
+      const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+      // Settings / API Key State
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem('studyai_gemini_key') || '');
+      const [tempApiKey, setTempApiKey] = useState(apiKey);
+      const [keySavedToast, setKeySavedToast] = useState(false);
+
+      // --- GAMIFICATION: DAILY CHECK-IN, EXP & STREAK ---
+      const [gamification, setGamification] = useState(() => {
+        const saved = localStorage.getItem('studyai_gamification');
+        if (saved) return JSON.parse(saved);
+        return {
+          exp: 120,
+          streak: 1,
+          lastCheckInDate: null
+        };
+      });
+      const [rewardToast, setRewardToast] = useState(null);
+
+      // --- STUDY LOGS FOR CHART (seconds per day: { "YYYY-MM-DD": seconds }) ---
+      const [studyLogs, setStudyLogs] = useState(() => {
+        const saved = localStorage.getItem('studyai_study_logs');
+        if (saved) return JSON.parse(saved);
+        // Seed nhẹ dữ liệu mẫu 4 ngày trước để biểu đồ trực quan ngay lần đầu mở
+        return {
+          [getTodayKey(-4)]: 2700, // 45p
+          [getTodayKey(-3)]: 4500, // 75p
+          [getTodayKey(-2)]: 1800, // 30p
+          [getTodayKey(-1)]: 5400, // 90p
+          [getTodayKey(0)]: 1500,  // 25p
+        };
+      });
+
+      // --- TAB 1 STATES: PLANNER & MULTI-MODE TIMER ---
+      const [subjects, setSubjects] = useState(() => {
+        const saved = localStorage.getItem('studyai_subjects');
+        return saved ? JSON.parse(saved) : DEFAULT_SUBJECTS;
+      });
+      const [todos, setTodos] = useState(() => {
+        const saved = localStorage.getItem('studyai_todos');
+        return saved ? JSON.parse(saved) : DEFAULT_TODOS;
+      });
+
+      // Subject Form
+      const [newSubjectName, setNewSubjectName] = useState('');
+      const [selectedColorIdx, setSelectedColorIdx] = useState(0);
+
+      // Todo Form & Filters
+      const [todoTitle, setTodoTitle] = useState('');
+      const [todoSubjectId, setTodoSubjectId] = useState(subjects[0]?.id || '');
+      const [todoPriority, setTodoPriority] = useState('medium');
+      const [todoDeadline, setTodoDeadline] = useState(getTodayKey(0));
+      const [filterSubject, setFilterSubject] = useState('all');
+
+      // Multi-mode Timer States: 'pomodoro' | 'countdown' | 'countup'
+      const [timerType, setTimerType] = useState('pomodoro');
+      const [pomodoroPhase, setPomodoroPhase] = useState('work'); // 'work' (25m) | 'break' (5m)
+      const [customMinutes, setCustomMinutes] = useState(45);
+      const [secondsValue, setSecondsValue] = useState(25 * 60); // remaining for pomo/countdown, elapsed for countup
+      const [isRunning, setIsRunning] = useState(false);
+      const [pomodoroSessions, setPomodoroSessions] = useState(() => Number(localStorage.getItem('studyai_pomo_count')) || 0);
+
+      // --- TAB 2 STATES: AI EXAM GENERATOR ---
+      const [studyMaterial, setStudyMaterial] = useState('');
+      const [fileName, setFileName] = useState('');
+      const [isParsingFile, setIsParsingFile] = useState(false);
+      
+      const [questionCount, setQuestionCount] = useState(5);
+      const [difficulty, setDifficulty] = useState('Trung bình');
+      const [questionType, setQuestionType] = useState('Trắc nghiệm 4 đáp án');
+      
+      const [isGenerating, setIsGenerating] = useState(false);
+      const [examError, setExamError] = useState('');
+      const [questions, setQuestions] = useState([]);
+      const [userAnswers, setUserAnswers] = useState({});
+      const [isSubmitted, setIsSubmitted] = useState(false);
+      const [examHistorySeed, setExamHistorySeed] = useState(0);
+
+      // --- PERSISTENCE EFFECTS ---
+      useEffect(() => {
+        localStorage.setItem('studyai_subjects', JSON.stringify(subjects));
+        if (subjects.length > 0 && !subjects.find(s => s.id === todoSubjectId)) {
+          setTodoSubjectId(subjects[0].id);
+        }
+      }, [subjects]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_todos', JSON.stringify(todos));
+      }, [todos]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_pomo_count', pomodoroSessions.toString());
+      }, [pomodoroSessions]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_gamification', JSON.stringify(gamification));
+      }, [gamification]);
+
+      useEffect(() => {
+        localStorage.setItem('studyai_study_logs', JSON.stringify(studyLogs));
+      }, [studyLogs]);
+
+      // --- HELPER: ADD EXP & STUDY TIME ---
+      const triggerRewardToast = (msg) => {
+        setRewardToast(msg);
+        setTimeout(() => setRewardToast(null), 3200);
+      };
+
+      const addExp = (amount, reason) => {
+        setGamification(prev => ({
+          ...prev,
+          exp: prev.exp + amount
+        }));
+        if (reason) {
+          triggerRewardToast(`+${amount} EXP • ${reason}`);
+        }
+      };
+
+      const recordStudySeconds = (secs) => {
+        if (secs <= 0) return;
+        const today = getTodayKey(0);
+        setStudyLogs(prev => ({
+          ...prev,
+          [today]: (prev[today] || 0) + secs
+        }));
+      };
+
+      // --- CHECK-IN HANDLER ---
+      const todayStr = getTodayKey(0);
+      const yesterdayStr = getTodayKey(-1);
+      const isCheckedInToday = gamification.lastCheckInDate === todayStr;
+
+      // Tính streak hiển thị thực tế (nếu bỏ lỡ hôm qua thì streak sẽ reset về 0 khi chưa điểm danh hôm nay)
+      const currentDisplayStreak =
+        gamification.lastCheckInDate === todayStr || gamification.lastCheckInDate === yesterdayStr
+          ? gamification.streak
+          : 0;
+
+      const handleDailyCheckIn = () => {
+        if (isCheckedInToday) return;
+        const newStreak = gamification.lastCheckInDate === yesterdayStr ? gamification.streak + 1 : 1;
+        const bonusExp = 50 + Math.min(newStreak * 10, 100); // 50 EXP cơ bản + thưởng chuỗi ngày
+
+        setGamification(prev => ({
+          exp: prev.exp + bonusExp,
+          streak: newStreak,
+          lastCheckInDate: todayStr
+        }));
+        triggerRewardToast(`Điểm danh thành công! +${bonusExp} EXP (Chuỗi ${newStreak} ngày 🔥)`);
+      };
+
+      // --- MULTI-MODE TIMER EFFECT ---
+      useEffect(() => {
+        let interval = null;
+        if (isRunning) {
+          interval = setInterval(() => {
+            if (timerType === 'countup') {
+              // Đếm tiến (Countup): tăng giây và cộng trực tiếp vào biểu đồ thời gian học
+              setSecondsValue(prev => prev + 1);
+              recordStudySeconds(1);
+            } else {
+              // Đếm ngược (Pomodoro hoặc Countdown)
+              setSecondsValue(prev => {
+                if (prev > 1) {
+                  // Ghi nhận thời gian học nếu đang ở phiên học Pomodoro hoặc Countdown
+                  if (timerType === 'countdown' || (timerType === 'pomodoro' && pomodoroPhase === 'work')) {
+                    recordStudySeconds(1);
+                  }
+                  return prev - 1;
+                } else {
+                  // Hết giờ
+                  setIsRunning(false);
+                  playNotificationBeep();
+                  if (timerType === 'pomodoro') {
+                    if (pomodoroPhase === 'work') {
+                      recordStudySeconds(1);
+                      setPomodoroSessions(s => s + 1);
+                      addExp(30, 'Hoàn thành phiên Pomodoro!');
+                      setPomodoroPhase('break');
+                      return 5 * 60;
+                    } else {
+                      setPomodoroPhase('work');
+                      return 25 * 60;
+                    }
+                  } else if (timerType === 'countdown') {
+                    recordStudySeconds(1);
+                    addExp(25, 'Hoàn thành mục tiêu đếm ngược!');
+                    return customMinutes * 60;
+                  }
+                  return 0;
+                }
+              });
+            }
+          }, 1000);
+        }
+        return () => clearInterval(interval);
+      }, [isRunning, timerType, pomodoroPhase, customMinutes]);
+
+      const playNotificationBeep = () => {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.12, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.45);
+        } catch (e) {}
+      };
+
+      const handleSelectTimerType = (type) => {
+        setIsRunning(false);
+        setTimerType(type);
+        if (type === 'pomodoro') {
+          setPomodoroPhase('work');
+          setSecondsValue(25 * 60);
+        } else if (type === 'countdown') {
+          setSecondsValue(customMinutes * 60);
+        } else {
+          setSecondsValue(0);
+        }
+      };
+
+      const switchPomodoroPhase = (phase) => {
+        setIsRunning(false);
+        setPomodoroPhase(phase);
+        setSecondsValue(phase === 'work' ? 25 * 60 : 5 * 60);
+      };
+
+      const handleCustomMinutesChange = (mins) => {
+        const valid = Math.max(1, Math.min(300, Number(mins) || 1));
+        setCustomMinutes(valid);
+        if (!isRunning && timerType === 'countdown') {
+          setSecondsValue(valid * 60);
+        }
+      };
+
+      const handleResetTimer = () => {
+        setIsRunning(false);
+        if (timerType === 'pomodoro') {
+          setSecondsValue(pomodoroPhase === 'work' ? 25 * 60 : 5 * 60);
+        } else if (timerType === 'countdown') {
+          setSecondsValue(customMinutes * 60);
+        } else {
+          if (secondsValue >= 60) {
+            const earnedExp = Math.floor(secondsValue / 60) * 2;
+            addExp(earnedExp, `Lưu phiên bấm giờ ${Math.floor(secondsValue / 60)} phút!`);
+          }
+          setSecondsValue(0);
+        }
+      };
+
+      const formatTimeDisplay = (totalSeconds) => {
+        const hrs = Math.floor(totalSeconds / 3600);
+        const mins = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
+        const secs = (totalSeconds % 60).toString().padStart(2, '0');
+        if (hrs > 0) {
+          return `${hrs.toString().padStart(2, '0')}:${mins}:${secs}`;
+        }
+        return `${mins}:${secs}`;
+      };
+
+      // --- LEVEL CALCULATION FROM EXP ---
+      const currentLevel = Math.floor(gamification.exp / 200) + 1;
+      const expInCurrentLevel = gamification.exp % 200;
+      const expLevelProgress = Math.round((expInCurrentLevel / 200) * 100);
+
+      // --- SETTINGS HANDLERS ---
+      const handleSaveApiKey = (e) => {
+        e.preventDefault();
+        const trimmed = tempApiKey.trim();
+        setApiKey(trimmed);
+        localStorage.setItem('studyai_gemini_key', trimmed);
+        setKeySavedToast(true);
+        setTimeout(() => {
+          setKeySavedToast(false);
+          setIsSettingsOpen(false);
+        }, 1200);
+      };
+
+      // --- TAB 1 HANDLERS: SUBJECTS & TODOS ---
+      const handleAddSubject = (e) => {
+        e.preventDefault();
+        if (!newSubjectName.trim()) return;
+        const colorObj = SUBJECT_COLORS[selectedColorIdx];
+        const newSub = {
+          id: 'sub-' + Date.now(),
+          name: newSubjectName.trim(),
+          ...colorObj
+        };
+        setSubjects([...subjects, newSub]);
+        setNewSubjectName('');
+        setSelectedColorIdx((selectedColorIdx + 1) % SUBJECT_COLORS.length);
+      };
+
+      const handleDeleteSubject = (id) => {
+        setSubjects(subjects.filter(s => s.id !== id));
+        setTodos(todos.filter(t => t.subjectId !== id));
+        if (filterSubject === id) setFilterSubject('all');
+      };
+
+      const handleAddTodo = (e) => {
+        e.preventDefault();
+        if (!todoTitle.trim()) return;
+        const newTodo = {
+          id: 'todo-' + Date.now(),
+          title: todoTitle.trim(),
+          subjectId: todoSubjectId || (subjects[0]?.id ?? ''),
+          priority: todoPriority,
+          deadline: todoDeadline,
+          completed: false
+        };
+        setTodos([newTodo, ...todos]);
+        setTodoTitle('');
+      };
+
+      const toggleTodo = (id) => {
+        setTodos(todos.map(t => {
+          if (t.id === id) {
+            const nextState = !t.completed;
+            if (nextState) {
+              addExp(15, 'Hoàn thành nhiệm vụ học tập!');
+            }
+            return { ...t, completed: nextState };
+          }
+          return t;
+        }));
+      };
+
+      const deleteTodo = (id) => {
+        setTodos(todos.filter(t => t.id !== id));
+      };
+
+      // --- TAB 2 HANDLERS: FILE UPLOAD & GEMINI API ---
+      const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setFileName(file.name);
+        setExamError('');
+        setIsParsingFile(true);
+
+        try {
+          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let extractedText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              const pageText = textContent.items.map(item => item.str).join(' ');
+              extractedText += pageText + '\n\n';
+            }
+            if (!extractedText.trim()) {
+              throw new Error('Không trích xuất được văn bản từ file PDF này (có thể là file scan hình ảnh).');
+            }
+            setStudyMaterial(extractedText.trim());
+          } else {
+            const text = await file.text();
+            setStudyMaterial(text);
+          }
+        } catch (err) {
+          setExamError('Lỗi đọc tệp: ' + err.message);
+        } finally {
+          setIsParsingFile(false);
+          e.target.value = '';
+        }
+      };
+
+      const generateExamWithGemini = async (isRegenerate = false) => {
+        if (!apiKey) {
+          setIsSettingsOpen(true);
+          setExamError('Vui lòng nhập Gemini API Key trong phần Cài đặt trước khi tạo đề.');
+          return;
+        }
+        if (!studyMaterial.trim() || studyMaterial.trim().length < 30) {
+          setExamError('Vui lòng nhập hoặc tải lên nội dung tài liệu học tập (tối thiểu 30 ký tự).');
+          return;
+        }
+
+        setIsGenerating(true);
+        setExamError('');
+        setIsSubmitted(false);
+        setUserAnswers({});
+
+        const nextSeed = isRegenerate ? examHistorySeed + 1 : 1;
+        setExamHistorySeed(nextSeed);
+
+        let typeInstruction = '';
+        if (questionType === 'Trắc nghiệm 4 đáp án') {
+          typeInstruction = `Dạng bài: Trắc nghiệm 4 đáp án (A, B, C, D). Mảng "options" phải có đúng 4 chuỗi lựa chọn rõ ràng. "correctAnswer" phải khớp chính xác 100% với một trong 4 chuỗi trong "options".`;
+        } else if (questionType === 'Điền khuyết') {
+          typeInstruction = `Dạng bài: Điền khuyết (Fill in the blank). Trong "question", dùng dấu "______" để biểu thị chỗ trống cần điền. Mảng "options" để rỗng []. "correctAnswer" là từ hoặc cụm từ ngắn gọn chính xác cần điền vào chỗ trống.`;
+        } else {
+          typeInstruction = `Dạng bài: Tự luận ngắn (Short Answer). Đặt câu hỏi yêu cầu trả lời ngắn gọn 1-3 câu. Mảng "options" để rỗng []. "correctAnswer" là đáp án mẫu chuẩn xác, súc tích.`;
+        }
+
+        const prompt = `Bạn là một chuyên gia giáo dục và khảo thí xuất sắc. Hãy dựa vào TÀI LIỆU HỌC TẬP dưới đây để tạo một đề ôn tập chất lượng cao.
+
+YÊU CẦU CẤU HÌNH:
+- Số lượng câu hỏi: Đúng ${questionCount} câu.
+- Mức độ khó: ${difficulty}.
+- ${typeInstruction}
+- Lần tạo đề thứ: #${nextSeed} ${isRegenerate ? '(QUAN TRỌNG: Hãy khai thác các khía cạnh khác, đặt câu hỏi hoàn toàn mới và đa dạng hơn so với các bộ đề trước từ cùng tài liệu này!)' : ''}
+- Ngôn ngữ: Tiếng Việt (trừ khi tài liệu gốc là ngoại ngữ thì dùng ngôn ngữ phù hợp).
+
+ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (JSON Array):
+Trả về một mảng JSON gồm ${questionCount} đối tượng, mỗi đối tượng có cấu trúc chính xác:
+[
+  {
+    "id": 1,
+    "question": "Nội dung câu hỏi...",
+    "options": ["Lựa chọn 1", "Lựa chọn 2", "Lựa chọn 3", "Lựa chọn 4"],
+    "correctAnswer": "Lựa chọn 1",
+    "explanation": "Giải thích chi tiết tại sao đáp án này đúng dựa trên tài liệu."
+  }
+]
+
+TÀI LIỆU HỌC TẬP:
+"""
+${studyMaterial.slice(0, 30000)}
+"""`;
+
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: isRegenerate ? 0.85 : 0.5,
+                  responseMimeType: "application/json"
+                }
+              })
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error?.message || `Lỗi API (${response.status})`);
+          }
+
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawText) {
+            throw new Error('Không nhận được phản hồi từ Gemini.');
+          }
+
+          const cleanedJson = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+          const parsedQuestions = JSON.parse(cleanedJson);
+
+          if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+            throw new Error('Dữ liệu đề thi trả về không đúng định dạng danh sách câu hỏi.');
+          }
+
+          setQuestions(parsedQuestions);
+        } catch (err) {
+          console.error(err);
+          setExamError(`Không thể tạo đề thi: ${err.message}. Hãy kiểm tra lại Gemini API Key của bạn.`);
+        } finally {
+          setIsGenerating(false);
+        }
+      };
+
+      const handleAnswerChange = (qIndex, value) => {
+        if (isSubmitted) return;
+        setUserAnswers(prev => ({ ...prev, [qIndex]: value }));
+      };
+
+      const checkQuestionCorrect = (q, qIndex) => {
+        const userAns = (userAnswers[qIndex] || '').trim().toLowerCase();
+        const correctAns = (q.correctAnswer || '').trim().toLowerCase();
+        if (!userAns) return false;
+        if (questionType === 'Trắc nghiệm 4 đáp án') {
+          return userAns === correctAns;
+        }
+        if (questionType === 'Điền khuyết') {
+          return userAns === correctAns || (correctAns.includes(userAns) && userAns.length >= 2);
+        }
+        const keywords = correctAns.split(/[\s,.;:!?()]+/).filter(w => w.length > 2);
+        if (keywords.length === 0) return userAns === correctAns;
+        const matched = keywords.filter(kw => userAns.includes(kw));
+        return matched.length / keywords.length >= 0.5;
+      };
+
+      const calculateScore = () => {
+        let correctCount = 0;
+        questions.forEach((q, idx) => {
+          if (checkQuestionCorrect(q, idx)) correctCount++;
+        });
+        return correctCount;
+      };
+
+      const handleExamSubmit = () => {
+        setIsSubmitted(true);
+        const score = calculateScore();
+        const earned = score * 10 + 10;
+        addExp(earned, `Hoàn thành bài ôn thi (${score}/${questions.length} câu đúng)!`);
+      };
+
+      // --- COMPUTED DATA FOR CHART & PLANNER ---
+      const last7DaysData = Array.from({ length: 7 }, (_, i) => {
+        const key = getTodayKey(i - 6);
+        const secs = studyLogs[key] || 0;
+        const mins = Math.round(secs / 60);
+        return {
+          dateKey: key,
+          label: getShortDayLabel(key),
+          minutes: mins,
+          isToday: i === 6
+        };
+      });
+
+      const maxMinutesInWeek = Math.max(...last7DaysData.map(d => d.minutes), 60);
+      const totalWeekMinutes = last7DaysData.reduce((acc, d) => acc + d.minutes, 0);
+      const todayMinutes = last7DaysData[6]?.minutes || 0;
+
+      const filteredTodos = todos.filter(t => filterSubject === 'all' || t.subjectId === filterSubject);
+      const completedCount = todos.filter(t => t.completed).length;
+      const progressPercent = todos.length > 0 ? Math.round((completedCount / todos.length) * 100) : 0;
+
+      const priorityBadge = (priority) => {
+        switch (priority) {
+          case 'high':
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700">Cao</span>;
+          case 'medium':
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">Trung bình</span>;
+          default:
+            return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-100 text-slate-600">Thấp</span>;
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          {/* --- FLOATING EXP TOAST NOTIFICATION --- */}
+          {rewardToast && (
+            <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-2.5 text-xs sm:text-sm font-medium animate-bounce">
+              <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                <Icon name="zap" size={15} />
+              </span>
+              <span>{rewardToast}</span>
+            </div>
+          )}
+
+          {/* --- TOP NAVIGATION BAR --- */}
+          <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+              {/* Brand Logo */}
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shadow-indigo-200">
+                  <Icon name="graduation-cap" size={20} />
+                </div>
+                <div>
+                  <span className="font-bold text-lg tracking-tight text-slate-900">Study<span className="text-indigo-600">AI</span></span>
+                  <span className="hidden lg:inline-block ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">Smart Workspace</span>
+                </div>
+              </div>
+
+              {/* Center Tabs */}
+              <nav className="flex items-center bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setActiveTab('planner')}
+                  className={`flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    activeTab === 'planner'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon name="layout-dashboard" size={16} />
+                  <span>Quản lý học tập</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('exam')}
+                  className={`flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    activeTab === 'exam'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon name="sparkles" size={16} />
+                  <span>Phòng ôn thi AI</span>
+                </button>
+              </nav>
+
+              {/* Right Quick Stats + Settings */}
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 text-xs font-semibold text-amber-800">
+                  <Icon name="flame" size={15} className="text-orange-500" />
+                  <span>{currentDisplayStreak} ngày</span>
+                  <span className="text-amber-300">|</span>
+                  <span className="text-indigo-700">{gamification.exp} EXP</span>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setTempApiKey(apiKey);
+                    setIsSettingsOpen(true);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                    apiKey
+                      ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                  title="Cài đặt Gemini API Key"
+                >
+                  <Icon name="settings" size={16} />
+                  <span className="hidden md:inline">{apiKey ? 'API Key' : 'Nhập Key'}</span>
+                  {!apiKey && <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>}
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* --- MAIN CONTENT AREA --- */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            
+            {/* ========================================================= */}
+            {/* TAB 1: QUẢN LÝ HỌC TẬP (DASHBOARD & PLANNER)              */}
+            {/* ========================================================= */}
+            {activeTab === 'planner' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN: CHECK-IN STREAK, MULTI-TIMER & SUBJECTS (4 cols) */}
+                <div className="lg:col-span-4 space-y-6">
+                  
+                  {/* 1. DAILY CHECK-IN, EXP & STREAK CARD */}
+                  <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-700 rounded-2xl p-5 text-white shadow-md">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-semibold backdrop-blur-xs">
+                          <Icon name="award" size={13} className="text-amber-300" />
+                          <span>Cấp độ {currentLevel}</span>
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-2">
+                          <span className="text-2xl font-extrabold tracking-tight">{gamification.exp}</span>
+                          <span className="text-xs font-medium text-indigo-200">EXP tích lũy</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right bg-white/10 px-3 py-2 rounded-xl border border-white/15">
+                        <div className="flex items-center justify-end gap-1 text-amber-300 font-bold text-lg">
+                          <Icon name="flame" size={20} className="fill-amber-400 text-amber-300" />
+                          <span>{currentDisplayStreak}</span>
+                        </div>
+                        <p className="text-[11px] text-indigo-100 font-medium">Chuỗi Streak</p>
+                      </div>
+                    </div>
+
+                    {/* Level EXP Bar */}
+                    <div className="mt-4">
+                      <div className="flex justify-between text-[11px] text-indigo-200 mb-1">
+                        <span>Tiến độ lên Cấp {currentLevel + 1}</span>
+                        <span>{expInCurrentLevel} / 200 EXP</span>
+                      </div>
+                      <div className="w-full h-2 bg-black/25 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                          style={{ width: `${expLevelProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    {/* Daily Check-in CTA */}
+                    <button
+                      onClick={handleDailyCheckIn}
+                      disabled={isCheckedInToday}
+                      className={`w-full mt-4 py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                        isCheckedInToday
+                          ? 'bg-white/15 text-indigo-100 cursor-default border border-white/15'
+                          : 'bg-amber-400 hover:bg-amber-300 text-slate-900 shadow-sm cursor-pointer'
+                      }`}
+                    >
+                      <Icon name={isCheckedInToday ? 'check-circle-2' : 'calendar-check'} size={17} />
+                      <span>
+                        {isCheckedInToday
+                          ? 'Đã điểm danh hôm nay (+EXP)'
+                          : 'Điểm danh nhận EXP & giữ Streak'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* 2. MULTI-MODE TIMER CARD (POMODORO / COUNTDOWN / COUNTUP) */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="timer" size={18} className="text-indigo-600" />
+                        <h2>Đồng hồ học tập</h2>
+                      </div>
+                      {timerType === 'pomodoro' && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                          {pomodoroSessions} phiên
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 3 Timer Modes Switcher */}
+                    <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl mb-4">
+                      <button
+                        onClick={() => handleSelectTimerType('pomodoro')}
+                        className={`py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          timerType === 'pomodoro'
+                            ? 'bg-white text-indigo-600 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Pomodoro
+                      </button>
+                      <button
+                        onClick={() => handleSelectTimerType('countdown')}
+                        className={`py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          timerType === 'countdown'
+                            ? 'bg-white text-indigo-600 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Countdown
+                      </button>
+                      <button
+                        onClick={() => handleSelectTimerType('countup')}
+                        className={`py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          timerType === 'countup'
+                            ? 'bg-white text-indigo-600 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Countup
+                      </button>
+                    </div>
+
+                    {/* Sub-controls per Timer Mode */}
+                    {timerType === 'pomodoro' && (
+                      <div className="grid grid-cols-2 gap-2 mb-4">
+                        <button
+                          onClick={() => switchPomodoroPhase('work')}
+                          className={`py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                            pomodoroPhase === 'work'
+                              ? 'border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          Tập trung (25p)
+                        </button>
+                        <button
+                          onClick={() => switchPomodoroPhase('break')}
+                          className={`py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                            pomodoroPhase === 'break'
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          Nghỉ ngắn (5p)
+                        </button>
+                      </div>
+                    )}
+
+                    {timerType === 'countdown' && (
+                      <div className="flex items-center justify-between gap-2 mb-4 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                        <span className="text-xs font-medium text-slate-600">Đặt số phút:</span>
+                        <div className="flex items-center gap-1.5">
+                          {[15, 30, 45, 60].map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              disabled={isRunning}
+                              onClick={() => handleCustomMinutesChange(m)}
+                              className={`px-2 py-1 rounded-md text-xs font-semibold transition-colors ${
+                                customMinutes === m
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50'
+                              }`}
+                            >
+                              {m}p
+                            </button>
+                          ))}
+                          <input
+                            type="number"
+                            min="1"
+                            max="300"
+                            disabled={isRunning}
+                            value={customMinutes}
+                            onChange={(e) => handleCustomMinutesChange(e.target.value)}
+                            className="w-14 text-xs text-center font-semibold py-1 px-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {timerType === 'countup' && (
+                      <div className="mb-4 text-center text-xs text-slate-500 bg-slate-50 py-2 px-3 rounded-xl border border-slate-200/70">
+                        Bấm giờ tự do — tự động ghi vào biểu đồ học tập
+                      </div>
+                    )}
+
+                    {/* Main Digital Clock Display */}
+                    <div className={`text-center py-5 rounded-2xl mb-4 border ${
+                      timerType === 'pomodoro' && pomodoroPhase === 'break'
+                        ? 'bg-emerald-50/60 border-emerald-100 text-emerald-950'
+                        : timerType === 'countup'
+                          ? 'bg-violet-50/60 border-violet-100 text-violet-950'
+                          : 'bg-indigo-50/60 border-indigo-100 text-indigo-950'
+                    }`}>
+                      <div className="text-4xl sm:text-5xl font-extrabold tracking-wider tabular-nums">
+                        {formatTimeDisplay(secondsValue)}
+                      </div>
+                      <p className="text-xs mt-1.5 opacity-75 font-medium">
+                        {timerType === 'pomodoro'
+                          ? (pomodoroPhase === 'work' ? 'Đang tính giờ học vào biểu đồ' : 'Thời gian nghỉ ngơi thư giãn')
+                          : timerType === 'countdown'
+                            ? `Đếm ngược mục tiêu ${customMinutes} phút`
+                            : 'Đang bấm giờ tiến (Countup)'}
+                      </p>
+                    </div>
+
+                    {/* Play / Pause / Reset Controls */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setIsRunning(!isRunning)}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm text-white transition-all shadow-sm ${
+                          isRunning
+                            ? 'bg-amber-500 hover:bg-amber-600'
+                            : timerType === 'pomodoro' && pomodoroPhase === 'break'
+                              ? 'bg-emerald-600 hover:bg-emerald-700'
+                              : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
+                      >
+                        <Icon name={isRunning ? 'pause' : 'play'} size={16} />
+                        <span>{isRunning ? 'Tạm dừng' : 'Bắt đầu'}</span>
+                      </button>
+                      <button
+                        onClick={handleResetTimer}
+                        className="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors text-xs font-semibold flex items-center gap-1"
+                        title="Đặt lại đồng hồ"
+                      >
+                        <Icon name="rotate-ccw" size={16} />
+                        {timerType === 'countup' && secondsValue > 0 && <span>Lưu & Reset</span>}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 3. SUBJECTS MANAGEMENT CARD */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="book-open" size={18} className="text-indigo-600" />
+                        <h2>Danh sách môn học</h2>
+                      </div>
+                      <span className="text-xs text-slate-500">{subjects.length} môn</span>
+                    </div>
+
+                    <form onSubmit={handleAddSubject} className="space-y-3 mb-4">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newSubjectName}
+                          onChange={(e) => setNewSubjectName(e.target.value)}
+                          placeholder="Tên môn học mới..."
+                          className="flex-1 text-sm px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1"
+                        >
+                          <Icon name="plus" size={16} />
+                          <span>Thêm</span>
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Màu nhãn:</span>
+                        <div className="flex gap-1.5">
+                          {SUBJECT_COLORS.map((c, idx) => (
+                            <button
+                              type="button"
+                              key={c.name}
+                              onClick={() => setSelectedColorIdx(idx)}
+                              className={`w-5 h-5 rounded-full ${c.color} transition-transform ${
+                                selectedColorIdx === idx ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title={c.name}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </form>
+
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {subjects.length === 0 ? (
+                        <p className="text-xs text-slate-400 text-center py-4">Chưa có môn học nào. Hãy thêm môn học đầu tiên!</p>
+                      ) : (
+                        subjects.map((sub) => {
+                          const taskCount = todos.filter(t => t.subjectId === sub.id && !t.completed).length;
+                          return (
+                            <div
+                              key={sub.id}
+                              className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-50 transition-colors group"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className={`w-3 h-3 rounded-full shrink-0 ${sub.color}`}></span>
+                                <span className="text-sm font-medium text-slate-700 truncate">{sub.name}</span>
+                                {taskCount > 0 && (
+                                  <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white border border-slate-200 text-slate-500">
+                                    {taskCount} việc
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleDeleteSubject(sub.id)}
+                                className="text-slate-400 hover:text-red-500 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Xóa môn học"
+                              >
+                                <Icon name="trash-2" size={15} />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: STUDY TIME CHART + TO-DO LIST (8 cols) */}
+                <div className="lg:col-span-8 space-y-6">
+                  
+                  {/* 1. STUDY TIME ANALYTICS CHART (7 DAYS) */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                          <Icon name="bar-chart-3" size={18} />
+                        </div>
+                        <div>
+                          <h2 className="font-semibold text-slate-800 text-base">Biểu đồ thời gian học (7 ngày qua)</h2>
+                          <p className="text-xs text-slate-500">Tự động đồng bộ từ đồng hồ Pomodoro, Countdown & Countup</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80 text-right">
+                          <p className="text-[11px] text-slate-500">Hôm nay</p>
+                          <p className="text-sm font-bold text-indigo-600">{todayMinutes} phút</p>
+                        </div>
+                        <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80 text-right">
+                          <p className="text-[11px] text-slate-500">Tổng 7 ngày</p>
+                          <p className="text-sm font-bold text-slate-800">{totalWeekMinutes} phút</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bar Chart Canvas */}
+                    <div className="grid grid-cols-7 gap-2 sm:gap-4 items-end h-44 pt-6 px-2 bg-slate-50/70 rounded-xl border border-slate-100">
+                      {last7DaysData.map((day) => {
+                        const heightPct = day.minutes > 0
+                          ? Math.max(10, Math.round((day.minutes / maxMinutesInWeek) * 100))
+                          : 4;
+                        return (
+                          <div key={day.dateKey} className="flex flex-col items-center h-full justify-end pb-2 group">
+                            <span className={`text-[11px] font-semibold mb-1.5 transition-opacity ${
+                              day.minutes > 0 ? 'text-slate-700' : 'text-slate-400'
+                            }`}>
+                              {day.minutes}p
+                            </span>
+                            <div className="w-full max-w-[38px] flex-1 flex items-end justify-center">
+                              <div
+                                style={{ height: `${heightPct}%` }}
+                                className={`w-full rounded-t-lg transition-all duration-500 ${
+                                  day.isToday
+                                    ? 'bg-gradient-to-t from-indigo-600 to-violet-500 shadow-sm shadow-indigo-200'
+                                    : day.minutes > 0
+                                      ? 'bg-indigo-300 group-hover:bg-indigo-400'
+                                      : 'bg-slate-200'
+                                }`}
+                                title={`${day.label}: ${day.minutes} phút`}
+                              ></div>
+                            </div>
+                            <span className={`text-[10px] sm:text-xs mt-2 font-medium truncate max-w-full ${
+                              day.isToday ? 'text-indigo-600 font-bold' : 'text-slate-500'
+                            }`}>
+                              {day.isToday ? 'Hôm nay' : day.label.split(' ')[0]}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 2. PROGRESS OVERVIEW BAR */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-3">
+                      <div>
+                        <h2 className="font-semibold text-slate-800 text-base">Tiến độ mục tiêu học tập</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Đã hoàn thành {completedCount} trên tổng số {todos.length} nhiệm vụ (+15 EXP mỗi việc hoàn thành)
+                        </p>
+                      </div>
+                      <span className="text-2xl font-bold text-indigo-600">{progressPercent}%</span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                        style={{ width: `${progressPercent}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* 3. TO-DO MANAGER CARD */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center gap-2 font-semibold text-slate-800 mb-4">
+                      <Icon name="check-square" size={18} className="text-indigo-600" />
+                      <h2>Kế hoạch & Việc cần làm (To-do List)</h2>
+                    </div>
+
+                    <form onSubmit={handleAddTodo} className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 mb-5 space-y-3">
+                      <div>
+                        <input
+                          type="text"
+                          value={todoTitle}
+                          onChange={(e) => setTodoTitle(e.target.value)}
+                          placeholder="Nhập nội dung bài tập, chương cần ôn luyện..."
+                          className="w-full text-sm px-3.5 py-2.5 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                        <select
+                          value={todoSubjectId}
+                          onChange={(e) => setTodoSubjectId(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        >
+                          {subjects.length === 0 && <option value="">Chưa có môn</option>}
+                          {subjects.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={todoPriority}
+                          onChange={(e) => setTodoPriority(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="high">Ưu tiên: Cao</option>
+                          <option value="medium">Ưu tiên: Trung bình</option>
+                          <option value="low">Ưu tiên: Thấp</option>
+                        </select>
+
+                        <input
+                          type="date"
+                          value={todoDeadline}
+                          onChange={(e) => setTodoDeadline(e.target.value)}
+                          className="text-xs sm:text-sm px-3 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500"
+                        />
+
+                        <button
+                          type="submit"
+                          disabled={subjects.length === 0}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-sm font-medium py-2 px-4 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <Icon name="plus-circle" size={16} />
+                          <span>Thêm việc</span>
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Subject Filter Pills */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-3 border-b border-slate-100">
+                      <button
+                        onClick={() => setFilterSubject('all')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium shrink-0 transition-colors ${
+                          filterSubject === 'all'
+                            ? 'bg-slate-800 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Tất cả ({todos.length})
+                      </button>
+                      {subjects.map(sub => {
+                        const count = todos.filter(t => t.subjectId === sub.id).length;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => setFilterSubject(sub.id)}
+                            className={`px-3 py-1 rounded-full text-xs font-medium shrink-0 flex items-center gap-1.5 transition-colors ${
+                              filterSubject === sub.id
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${filterSubject === sub.id ? 'bg-white' : sub.color}`}></span>
+                            <span>{sub.name} ({count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Tasks List */}
+                    <div className="space-y-2.5">
+                      {filteredTodos.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400">
+                          <Icon name="clipboard-check" size={36} className="mx-auto mb-2 opacity-40" />
+                          <p className="text-sm">Không có nhiệm vụ nào trong mục này.</p>
+                        </div>
+                      ) : (
+                        filteredTodos.map(todo => {
+                          const sub = subjects.find(s => s.id === todo.subjectId);
+                          const isOverdue = !todo.completed && todo.deadline && todo.deadline < todayStr;
+
+                          return (
+                            <div
+                              key={todo.id}
+                              className={`flex items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-all ${
+                                todo.completed
+                                  ? 'bg-slate-50/60 border-slate-100 opacity-65'
+                                  : 'bg-white border-slate-200 hover:border-indigo-200 shadow-xs'
+                              }`}
+                            >
+                              <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                                <button
+                                  onClick={() => toggleTodo(todo.id)}
+                                  className={`mt-0.5 sm:mt-0 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                                    todo.completed
+                                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                                      : 'border-slate-300 hover:border-indigo-500'
+                                  }`}
+                                >
+                                  {todo.completed && <Icon name="check" size={13} />}
+                                </button>
+
+                                <div className="min-w-0 flex-1">
+                                  <p className={`text-sm font-medium break-words ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                    {todo.title}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                    {sub && (
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${sub.bgLight} ${sub.textColor}`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${sub.color}`}></span>
+                                        {sub.name}
+                                      </span>
+                                    )}
+                                    {priorityBadge(todo.priority)}
+                                    {todo.deadline && (
+                                      <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+                                        <Icon name="calendar" size={12} />
+                                        {todo.deadline}
+                                        {isOverdue && ' (Quá hạn)'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => deleteTodo(todo.id)}
+                                className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                                title="Xóa công việc"
+                              >
+                                <Icon name="trash-2" size={16} />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* TAB 2: PHÒNG ÔN THI AI (AI EXAM GENERATOR)                */}
+            {/* ========================================================= */}
+            {activeTab === 'exam' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN: MATERIAL INPUT & CONFIG (5 cols) */}
+                <div className="lg:col-span-5 space-y-5">
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <Icon name="file-text" size={18} className="text-indigo-600" />
+                        <h2>1. Nguồn tài liệu ôn tập</h2>
+                      </div>
+                      {studyMaterial && (
+                        <button
+                          onClick={() => {
+                            setStudyMaterial('');
+                            setFileName('');
+                            setQuestions([]);
+                            setIsSubmitted(false);
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"
+                        >
+                          <Icon name="x" size={14} /> Xóa nội dung
+                        </button>
+                      )}
+                    </div>
+
+                    <label className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl bg-slate-50/60 hover:bg-indigo-50/30 cursor-pointer transition-colors">
+                      <div className="flex items-center gap-2 text-indigo-600 font-medium text-sm">
+                        <Icon name="upload-cloud" size={20} />
+                        <span>{isParsingFile ? 'Đang trích xuất văn bản...' : 'Tải lên tệp (.txt, .md, .pdf)'}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 text-center">
+                        {fileName ? `Đã chọn: ${fileName}` : 'Hoặc dán trực tiếp nội dung bài học vào khung bên dưới'}
+                      </p>
+                      <input
+                        type="file"
+                        accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <div>
+                      <textarea
+                        rows={7}
+                        value={studyMaterial}
+                        onChange={(e) => setStudyMaterial(e.target.value)}
+                        placeholder="Dán nội dung bài giảng, tóm tắt lý thuyết, ghi chú hoặc đoạn văn bản cần ôn thi tại đây..."
+                        className="w-full text-sm p-3.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-y"
+                      />
+                      <div className="flex justify-between text-xs text-slate-400 mt-1">
+                        <span>Hỗ trợ tối đa ~30.000 ký tự</span>
+                        <span>{studyMaterial.length.toLocaleString()} ký tự</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 space-y-3">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
+                        <Icon name="sliders" size={16} className="text-indigo-600" />
+                        <h3>2. Tùy chỉnh cấu trúc đề thi</h3>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Số lượng câu hỏi</label>
+                          <select
+                            value={questionCount}
+                            onChange={(e) => setQuestionCount(Number(e.target.value))}
+                            className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value={5}>5 câu hỏi</option>
+                            <option value={10}>10 câu hỏi</option>
+                            <option value={20}>20 câu hỏi</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Mức độ khó</label>
+                          <select
+                            value={difficulty}
+                            onChange={(e) => setDifficulty(e.target.value)}
+                            className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="Dễ">Dễ (Nhận biết)</option>
+                            <option value="Trung bình">Trung bình (Thông hiểu)</option>
+                            <option value="Khó">Khó (Vận dụng cao)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Dạng bài kiểm tra</label>
+                        <select
+                          value={questionType}
+                          onChange={(e) => setQuestionType(e.target.value)}
+                          className="w-full text-sm px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="Trắc nghiệm 4 đáp án">Trắc nghiệm 4 đáp án (A, B, C, D)</option>
+                          <option value="Điền khuyết">Điền khuyết (Điền từ vào chỗ trống)</option>
+                          <option value="Tự luận ngắn">Tự luận ngắn (Trả lời câu hỏi)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {examError && (
+                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                        <Icon name="alert-circle" size={16} className="shrink-0 mt-0.5" />
+                        <span>{examError}</span>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => generateExamWithGemini(false)}
+                      disabled={isGenerating || isParsingFile}
+                      className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold text-sm shadow-sm shadow-indigo-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Icon name="loader-2" size={18} className="animate-spin" />
+                          <span>AI đang phân tích & biên soạn đề...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="sparkles" size={18} />
+                          <span>Tạo đề ôn tập</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: INTERACTIVE EXAM WORKSPACE (7 cols) */}
+                <div className="lg:col-span-7">
+                  {questions.length === 0 && !isGenerating ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center h-full flex flex-col items-center justify-center min-h-[420px]">
+                      <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
+                        <Icon name="brain-circuit" size={32} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-slate-800">Sẵn sàng luyện đề cùng StudyAI</h3>
+                      <p className="text-sm text-slate-500 max-w-md mt-2 leading-relaxed">
+                        Nhập tài liệu học tập hoặc tải file PDF/TXT ở cột bên trái, chọn cấu hình mong muốn và nhấn <strong>"Tạo đề ôn tập"</strong> để AI tự động sinh đề thi tương tác không giới hạn.
+                      </p>
+                    </div>
+                  ) : isGenerating ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center h-full flex flex-col items-center justify-center min-h-[420px]">
+                      <div className="w-14 h-14 rounded-full border-4 border-indigo-100 border-t-indigo-600 animate-spin mb-4"></div>
+                      <h3 className="text-base font-semibold text-slate-800">Gemini 2.5 Flash đang tạo bộ câu hỏi...</h3>
+                      <p className="text-xs text-slate-500 mt-1">Quá trình này thường mất từ 3 đến 8 giây tùy độ dài tài liệu.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                              Đề số #{examHistorySeed}
+                            </span>
+                            <span className="text-xs text-slate-500">{questions.length} câu • Mức độ: {difficulty}</span>
+                          </div>
+                          <h2 className="font-bold text-slate-800 text-lg mt-1">Bài kiểm tra ôn tập</h2>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => generateExamWithGemini(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors"
+                          >
+                            <Icon name="refresh-cw" size={14} />
+                            <span>Tạo đề mới từ tài liệu này</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {isSubmitted && (
+                        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-5 text-white shadow-md flex flex-wrap items-center justify-between gap-4">
+                          <div>
+                            <p className="text-indigo-100 text-xs font-medium uppercase tracking-wider">Kết quả chấm điểm tự động</p>
+                            <div className="flex items-baseline gap-3 mt-1">
+                              <span className="text-3xl font-bold">
+                                {calculateScore()}/{questions.length} câu đúng
+                              </span>
+                              <span className="text-sm bg-white/20 px-2.5 py-0.5 rounded-full font-medium">
+                                Điểm: {((calculateScore() / questions.length) * 10).toFixed(1)} / 10
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setIsSubmitted(false);
+                              setUserAnswers({});
+                            }}
+                            className="px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-semibold transition-colors"
+                          >
+                            Làm lại đề này
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="space-y-4">
+                        {questions.map((q, qIdx) => {
+                          const isCorrect = isSubmitted ? checkQuestionCorrect(q, qIdx) : null;
+                          const optionLetters = ['A', 'B', 'C', 'D', 'E'];
+
+                          return (
+                            <div
+                              key={qIdx}
+                              className={`bg-white rounded-2xl border p-5 shadow-xs transition-all ${
+                                isSubmitted
+                                  ? isCorrect
+                                    ? 'border-emerald-300 bg-emerald-50/10'
+                                    : 'border-red-300 bg-red-50/10'
+                                  : 'border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3 mb-3">
+                                <h3 className="text-sm sm:text-base font-semibold text-slate-800 leading-snug">
+                                  <span className="text-indigo-600 mr-1.5">Câu {qIdx + 1}:</span>
+                                  {q.question}
+                                </h3>
+                                {isSubmitted && (
+                                  <span className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                    isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    <Icon name={isCorrect ? 'check-circle-2' : 'x-circle'} size={14} />
+                                    {isCorrect ? 'Chính xác' : 'Chưa đúng'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {questionType === 'Trắc nghiệm 4 đáp án' && Array.isArray(q.options) && q.options.length > 0 ? (
+                                <div className="space-y-2 mt-3">
+                                  {q.options.map((opt, optIdx) => {
+                                    const selected = userAnswers[qIdx] === opt;
+                                    const isThisCorrectOption = opt.trim().toLowerCase() === (q.correctAnswer || '').trim().toLowerCase();
+
+                                    let optionStyle = 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50';
+                                    if (!isSubmitted && selected) {
+                                      optionStyle = 'border-indigo-600 bg-indigo-50/70 text-indigo-900 font-medium';
+                                    } else if (isSubmitted) {
+                                      if (isThisCorrectOption) {
+                                        optionStyle = 'border-emerald-500 bg-emerald-50 text-emerald-900 font-medium';
+                                      } else if (selected && !isThisCorrectOption) {
+                                        optionStyle = 'border-red-400 bg-red-50 text-red-900';
+                                      } else {
+                                        optionStyle = 'border-slate-100 opacity-60';
+                                      }
+                                    }
+
+                                    return (
+                                      <button
+                                        key={optIdx}
+                                        type="button"
+                                        disabled={isSubmitted}
+                                        onClick={() => handleAnswerChange(qIdx, opt)}
+                                        className={`w-full text-left p-3 rounded-xl border text-sm flex items-center gap-3 transition-all ${optionStyle}`}
+                                      >
+                                        <span className={`w-6 h-6 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
+                                          !isSubmitted && selected
+                                            ? 'bg-indigo-600 text-white'
+                                            : isSubmitted && isThisCorrectOption
+                                              ? 'bg-emerald-600 text-white'
+                                              : isSubmitted && selected
+                                                ? 'bg-red-500 text-white'
+                                                : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {optionLetters[optIdx] || optIdx + 1}
+                                        </span>
+                                        <span className="flex-1">{opt}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="mt-3">
+                                  {questionType === 'Điền khuyết' ? (
+                                    <input
+                                      type="text"
+                                      disabled={isSubmitted}
+                                      value={userAnswers[qIdx] || ''}
+                                      onChange={(e) => handleAnswerChange(qIdx, e.target.value)}
+                                      placeholder="Nhập từ/cụm từ còn thiếu..."
+                                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 disabled:bg-slate-50"
+                                    />
+                                  ) : (
+                                    <textarea
+                                      rows={2}
+                                      disabled={isSubmitted}
+                                      value={userAnswers[qIdx] || ''}
+                                      onChange={(e) => handleAnswerChange(qIdx, e.target.value)}
+                                      placeholder="Nhập câu trả lời ngắn gọn của bạn..."
+                                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 disabled:bg-slate-50"
+                                    />
+                                  )}
+                                </div>
+                              )}
+
+                              {isSubmitted && (
+                                <div className="mt-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs sm:text-sm space-y-1.5">
+                                  <div className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                                    <Icon name="check-circle" size={15} />
+                                    <span>Đáp án chuẩn: {q.correctAnswer}</span>
+                                  </div>
+                                  <p className="text-slate-600 leading-relaxed">
+                                    <strong className="text-slate-700">Giải thích:</strong> {q.explanation}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {!isSubmitted && (
+                        <div className="sticky bottom-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200 shadow-lg flex items-center justify-between gap-4">
+                          <span className="text-xs sm:text-sm text-slate-600">
+                            Đã trả lời: <strong>{Object.values(userAnswers).filter(v => v && v.trim() !== '').length}</strong> / {questions.length} câu
+                          </span>
+                          <button
+                            onClick={handleExamSubmit}
+                            className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-sm transition-colors flex items-center gap-2"
+                          >
+                            <Icon name="send" size={16} />
+                            <span>Nộp bài & Chấm điểm</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* --- SETTINGS MODAL (GEMINI API KEY) --- */}
+          {isSettingsOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-6 shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Icon name="key-round" size={18} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base">Cài đặt Gemini API Key</h3>
+                      <p className="text-xs text-slate-500">Kết nối trực tiếp với mô hình gemini-2.5-flash</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                  >
+                    <Icon name="x" size={18} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveApiKey} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Google Gemini API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={tempApiKey}
+                      onChange={(e) => setTempApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                    />
+                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                      Key của bạn được lưu cục bộ trên trình duyệt (<code className="bg-slate-100 px-1 rounded">LocalStorage</code>) và chỉ gửi trực tiếp đến máy chủ Google API. Lấy key miễn phí tại{' '}
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-600 hover:underline font-medium"
+                      >
+                        Google AI Studio
+                      </a>.
+                    </p>
+                  </div>
+
+                  {keySavedToast && (
+                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium flex items-center gap-2">
+                      <Icon name="check-circle-2" size={16} />
+                      <span>Đã lưu API Key thành công!</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                    >
+                      Đóng
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors"
+                    >
+                      Lưu cấu hình
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
